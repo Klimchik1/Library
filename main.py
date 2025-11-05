@@ -6,9 +6,9 @@ from firebase_admin import credentials, db, auth
 import math
 
 # From Doc - https://firebase.google.com/docs/database/admin/start?authuser=1#python
-cred = credentials.Certificate("serviceAccount.json")
+cred = credentials.Certificate("serviceAccount.json") 
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://example-talbot-default-rtdb.europe-west1.firebasedatabase.app/'
+    'databaseURL': 'https://library-school-project-8aebb-default-rtdb.firebaseio.com/'
 })
 
 API_KEY = 'AIzaSyBNAJ7og35wwPcjIsF_ZTHFKCz48m0ylUg'
@@ -127,8 +127,11 @@ class RegisterFrame(ttk.Frame):
         backToLoginButton = ttk.Button(frm, text="Back to login", command=lambda: self.controller.showFrame(LoginFrame),
                                        width=15)
         backToLoginButton.grid(column=1, row=5, pady=(10, 0), sticky='e')
-
-
+"""
+class DashboardFrame(ttk.Frame):
+    def __init__(self, parent, controller: App):
+        super().__init__(parent)
+"""
 if __name__ == '__main__':
     app = App()
     app.mainloop()
