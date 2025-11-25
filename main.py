@@ -5,6 +5,7 @@ import firebase_admin
 from cachetools.func import ttl_cache
 from firebase_admin import credentials, db, auth
 import math
+import requests
 
 # From Doc - https://firebase.google.com/docs/database/admin/start?authuser=1#python
 cred = credentials.Certificate("serviceAccount.json")
@@ -12,17 +13,65 @@ firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://library-school-project-8aebb-default-rtdb.firebaseio.com/'
 })
 
-API_KEY = 'AIzaSyBNAJ7og35wwPcjIsF_ZTHFKCz48m0ylUg'
+API_KEY = "AIzaSyAIroF0sWbzbKiiC05y27rAyQcKNgYWQpI"
 
 
 def firebaseRegister(email, password, fullName):
-    user = auth.create_user(
-        email=email,
-        password=password,
-        display_name=fullName
-    )
+    #usersref = db.reference('/users')
+    #usersref.push({'email': email, 'password': password, 'fullName': fullName})
+    user=auth.create_user(email=email, password=password, display_name=fullName)
     messagebox.showinfo("Success", "User was registered!")
 
+#class DataBase:
+    #def __init__(self):
+        #pass
+
+def saveBook(title, author, genre, ISBN, copies):
+    book = {
+        "title": title,
+        "author": author,
+        "genre": genre,
+        "ISBN": ISBN,
+        "copies": copies,
+        "available": copies
+    }
+    booksref = db.reference('/books')
+    booksref.push(book)
+
+def editBook(bookID, title, author, genre, ISBN, copies):
+    book = {
+        "bookID": bookID,
+        "title": title,
+        "author": author,
+        "genre": genre,
+        "ISBN": ISBN,
+        "copies": copies,
+        "available": copies
+    }
+    bookref = db.reference('/books/' + bookID)
+    bookref.set(book)
+
+def getBooks():
+    booksref = db.reference('/books')
+    return booksref.get()
+
+def getBook(id):
+    bookref = db.reference('/books/' + id)
+    return bookref.get()
+
+def deleteBook(id):
+    bookref = db.reference('/books/' + id)
+    try:
+        bookref.delete()
+    except:
+        messagebox.showerror("Error", "Book not found")
+
+def searchBook(title):
+    booksref = db.reference('/books')
+    print(booksref.get())
+    booksrefbytitle = booksref.order_by_child('title').equal_to(str(title))
+    print(booksrefbytitle.get())
+    return booksrefbytitle.get()
 
 class App(tk.Tk):
     def __init__(self):
@@ -30,7 +79,7 @@ class App(tk.Tk):
         self.title('Library Manager')
         self.geometry('1000x700')
         self.resizable(True, True)
-
+        self.currentUser = None
         self.buildFrames()
         self.showFrame(LoginFrame)
 
@@ -51,8 +100,22 @@ class App(tk.Tk):
         frame.tkraise()
         if hasattr(frame, 'on_show'):
             frame.on_show()
-    def login(self):
-        self.showFrame(DashboardFrame)
+    def login(self, email, password):
+        url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={API_KEY}"
+        payload = {
+            "email": email,
+            "password": password,
+            "returnSecureToken": True
+        }
+        r = requests.post(url, json=payload)
+        if('error' in r.json().keys()):
+            errormessage = r.json()['error']['message']
+            messagebox.showerror(errormessage, f"Login failed with error: {errormessage}")
+        else:
+            self.currentUser=r.json()
+            self.showFrame(DashboardFrame)
+
+
     def logout(self):
         pass
 
@@ -68,7 +131,7 @@ class LoginFrame(ttk.Frame):
         password = self.password.get().strip()
 
         if len(email) > 0 and len(password) > 0:
-            self.controller.login()
+            self.controller.login(email, password)
 
 
 
@@ -97,8 +160,9 @@ class RegisterFrame(ttk.Frame):
 
     def createAccount(self):
         print(self.email.get().strip())
-        if self.confirmPass.get().strip() == self.password.get().strip() and len(
-                self.password.get().strip()) > 0 and len(self.email.get().strip()) > 0:
+        if (self.confirmPass.get().strip() == self.password.get().strip() and len(
+                self.password.get().strip()) > 0 and len(self.email.get().strip()) > 0 and len(self.name.get().strip()) > 0
+                and len(self.surname.get().strip()) > 0):
             firebaseRegister(self.email.get().strip(), self.password.get().strip(),
                              self.name.get().strip() + ' ' + self.surname.get().strip())
 
@@ -174,8 +238,10 @@ class DashboardFrame(ttk.Frame):
 class BookManagerFrame(ttk.Frame):
     def __init__(self, parent, controller: App):
         super().__init__(parent)
+        self.selectedBookID = None
         self.controller = controller
         self._build()
+        self.refresh()
 
     def _build(self):
         top = ttk.Frame(self)
@@ -196,19 +262,59 @@ class BookManagerFrame(ttk.Frame):
         self.loansTree.heading('available', text='Available')
         self.loansTree.heading('total', text='Total')
         self.loansTree.pack(fill='both', expand=True)
-
+        self.loansTree.bind('<<TreeviewSelect>>', self.onSelect)
 
         bottom = ttk.Frame(self)
         bottom.pack(fill='x', pady=8)
         ttk.Button(bottom, text='Refresh', command=lambda: self.on_show).pack(side='left', padx=8)
 
+    def refresh(self):
+        self.loansTree.delete(*self.loansTree.get_children())
+        books = getBooks() or {}
+        for bid, book in books.items():
+            self.loansTree.insert('', 'end', iid = bid, values = (book['title'], book['author'], book['genre'], book['available'],book['copies']))
+
+    def onSelect(self, event):
+        s = self.loansTree.selection()
+        if s:
+            self.selectedBookID = s[0]
+        else:
+            self.selectedBookID = None
+
     def add_book(self):
         dlg=AddBookFrame(self, 'Add Book')
         self.wait_window(dlg)
+        if dlg.result:
+            title, author, genre, isbn, copies = dlg.result
+            try:
+                copies = int(copies)
+            except ValueError:
+                copies = 1
+            saveBook(title, author, genre, isbn, copies)
+            self.refresh()
+
     def edit_selected(self):
-        pass
+        if not(self.selectedBookID):
+            messagebox.showerror("Error", "Selected Book ID is missing")
+            return
+        book = getBook(self.selectedBookID)
+        dlg=AddBookFrame(self, 'Edit Selected Book', book)
+        self.wait_window(dlg)
+        if dlg.result:
+            title, author, genre, isbn, copies = dlg.result
+            try:
+                copies = int(copies)
+            except ValueError:
+                copies = 1
+            editBook(self.selectedBookID, title, author, genre, isbn, copies)
+            self.refresh()
+
     def delete_selected(self):
-        pass
+        if not (self.selectedBookID):
+            messagebox.showerror("Error", "Selected Book ID is missing")
+            return
+        deleteBook(self.selectedBookID)
+        self.refresh()
     def borrow_selected(self):
         pass
     def return_selected_loan(self):
@@ -253,21 +359,34 @@ class AddBookFrame(tk.Toplevel):
         cancelButton = ttk.Button(frm, text="Cancel", command=self.destroy, width=15)
         cancelButton.grid(column=1, row=5, pady=(10, 0), sticky='e')
 
-    def save(self):
-        pass
+        if self.initial:
+            self.f_title.insert(0, self.initial['title'])
+            self.f_author.insert(0, self.initial['author'])
+            self.f_genre.insert(0, self.initial['genre'])
+            self.f_isbn.insert(0, self.initial['ISBN'])
+            self.f_copies.insert(0, str(self.initial['copies']))
 
+    def save(self):
+        title = self.f_title.get().strip()
+        if not title:
+            messagebox.showerror("Error", "Title cannot be empty")
+            return
+        self.result = (self.f_title.get().strip(), self.f_author.get().strip(), self.f_genre.get().strip(), self.f_isbn.get().strip(), self.f_copies.get().strip())
+        self.destroy()
 class SearchFrame(ttk.Frame):
     def __init__(self, parent, controller: App):
         super().__init__(parent)
         self.controller = controller
         self._build()
+        self.refresh()
 
     def _build(self):
         top = ttk.Frame(self)
         top.pack(fill='x', pady=8)
         ttk.Button(top, text='Back', command=lambda: self.controller.showFrame(DashboardFrame)).pack(side='left', padx=8)
         ttk.Label(top, text='Title').pack(side='left')
-        self.s_title = ttk.Entry(top, width=25).pack(side='left')
+        self.s_title = ttk.Entry(top, width=25)
+        self.s_title.pack(side='left')
         ttk.Label(top, text='Author').pack(side='left')
         self.s_author = ttk.Entry(top, width=25).pack(side='left')
         ttk.Label(top, text='Genre').pack(side='left')
@@ -288,8 +407,19 @@ class SearchFrame(ttk.Frame):
         bottom.pack(fill='x', pady=8)
         ttk.Button(bottom, text='Borrow Selected', command=lambda: self.borrow_selected).pack(side='left', padx=8)
 
+    def refresh(self):
+        self.loansTree.delete(*self.loansTree.get_children())
+        books = {}
+        if not self.s_title.get().strip():
+            books = getBooks() or {}
+        else:
+            books = searchBook(title=self.s_title.get().strip())
+        for bid, book in books.items():
+            self.loansTree.insert('', 'end', iid = bid, values = (book['title'], book['author'], book['genre'], book['available']))
+
     def search(self):
-        pass
+        self.refresh()
+
     def borrow_selected(self):
         pass
 class LoanHistoryFrame(ttk.Frame):
